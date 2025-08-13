@@ -1,0 +1,61 @@
+name: plan-core
+
+on:
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  plan-core:
+    runs-on: ubuntu-latest
+
+    env:
+      ARM_TENANT_ID: ${{secrets.ALZ_DEPLOY_TENANT_ID}}
+      ARM_CLIENT_ID: ${{secrets.ALZ_DEPLOY_CORE_CANARY_CLIENT_ID}}
+      ARM_SUBSCRIPTION_ID: ${{secrets.AZURE_PROD_MGMT_SUB_ID}}
+      ARM_USE_OIDC: true
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set environment based on branch
+        run: |
+          if [ "${{ github.ref }}" == "refs/heads/main" ]; then
+            echo "ENVIRONMENT=prod" >> $GITHUB_ENV
+          elif [ "${{ github.ref }}" == "refs/heads/canary" ]; then
+            echo "ENVIRONMENT=canary" >> $GITHUB_ENV
+          fi
+
+      - name: Print environment
+        run: echo "Environment is ${{ env.ENVIRONMENT }}"
+
+      - name: Azure Login
+        uses: Azure/login@v2
+        with:
+          client-id: ${{secrets.ALZ_DEPLOY_CORE_CANARY_CLIENT_ID}}
+          tenant-id: ${{secrets.ALZ_DEPLOY_TENANT_ID}}
+          allow-no-subscriptions: true
+
+      # - name: Set Az Context
+      #   run: az account set --subscription ${{ github.event.inputs.subscription_id }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+
+      - name: Initialize Terraform
+        working-directory: ./core
+        run: |
+          terraform init \
+          -backend-config="storage_account_name=${{vars.ALZ_DEPLOY_STORAGE_ACCOUNT_NAME}}" \
+          -backend-config="container_name=tfstate-${{env.ENVIRONMENT}}" \
+
+      - name: Terraform Plan
+        working-directory: ./core
+        run: |
+          export ARM_TENANT_ID=${{secrets.ALZ_DEPLOY_TENANT_ID}}
+          export ARM_CLIENT_ID=${{secrets.ALZ_DEPLOY_CORE_CANARY_CLIENT_ID}}
+          export ARM_USE_OIDC=true
+          terraform plan -var-file="vars-${{ env.ENVIRONMENT }}.tfvars"
